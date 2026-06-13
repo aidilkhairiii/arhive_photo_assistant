@@ -6,7 +6,7 @@ restoration priority. The work is split into **4 modules**, one per team member:
 | Module | File | Owner | Status |
 |---|---|---|---|
 | 1. Image Upload & Preprocessing | `preprocessing.py` | (me) | ✅ Done |
-| 2. Image Quality Assessment | `quality_assestment.py` | teammate | ⬜ To do |
+| 2. Image Quality Assessment | `quality_assestment.py` | teammate | ✅ Done |
 | 3. Fading Analysis & Object Tagging | `fading_analysis.py` | teammate | ⬜ To do |
 | 4. Report Generation & Dashboard | `report_generator.py` | teammate | ⬜ To do |
 | Orchestrator (runs all modules) | `main.py` | shared | ⬜ To do |
