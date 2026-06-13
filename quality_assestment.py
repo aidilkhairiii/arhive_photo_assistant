@@ -205,7 +205,7 @@ def assess_quality(
         image = _as_grayscale(metadata_or_image)
 
     return {
-        "blur": calculate_blur_score(image),
+        "sharpness": calculate_blur_score(image),
         "brightness": calculate_brightness(image),
         "contrast": calculate_contrast(image),
     }
