@@ -6,3 +6,5 @@ __pycache__/
 data/processed/
 outputs/
 *.npy
+Instructions.pdf
+.env

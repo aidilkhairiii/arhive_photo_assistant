@@ -7,9 +7,9 @@ restoration priority. The work is split into **4 modules**, one per team member:
 |---|---|---|---|
 | 1. Image Upload & Preprocessing | `preprocessing.py` | (me) | ✅ Done |
 | 2. Image Quality Assessment | `quality_assestment.py` | teammate | ✅ Done |
-| 3. Fading Analysis & Object Tagging | `fading_analysis.py` | teammate | ⬜ To do |
-| 4. Report Generation & Dashboard | `report_generator.py` | teammate | ⬜ To do |
-| Orchestrator (runs all modules) | `main.py` | shared | ⬜ To do |
+| 3. Fading Analysis & Object Tagging | `fading_analysis.py` | teammate | ✅ Done |
+| 4. Report Generation & Dashboard | `report_generator.py` | teammate | ✅ Done |
+| Orchestrator (runs all modules) | `main.py` | shared | ✅ Done |
 
 The modules run as a **pipeline**: Module 1 prepares each image and writes a
 metadata JSON; Modules 2–4 read that JSON and add their own results on top.
@@ -239,34 +239,102 @@ Read `processed_color_path` (color is required for fading), **crop to
 - Fading: analyze the color histogram / saturation; classify None / Mild / Moderate / Severe.
   **Check `is_grayscale` first** — if true, there's no colour to fade, so use a
   tonal/sepia-based judgement instead of saturation.
-- Tags / captioning: send the image to an LLM vision API (see below).
+- Tags: currently simple OpenCV heuristics (edge density + Haar face detection).
+  Swapping in an LLM vision API is a future upgrade.
 
 ### Module 4 — `report_generator.py`
-Combine Module 1 + 2 + 3 results per image, then:
-- Calculate a condition score, rank restoration priority.
-- Generate the report / dashboard, e.g.:
-  ```
-  Condition: Fair
-  Issues: ✓ Moderate blur  ✓ Severe fading
-  Priority: High Restoration Priority
-  ```
-- The human-readable narrative can be written by an LLM API.
+Module 4 is the final stage. It reads each metadata JSON (with Module 1–3 results
+already in it), turns the raw numbers into a **decision**, and produces the
+**visual outputs** the assignment requires.
 
-### `main.py` — orchestrator
-Loops over each image and chains the modules:
-```python
-m1 = preprocess_image(path, "data/processed")   # already implemented
-m2 = assess_quality(m1)                          # Module 2
-m3 = analyze_fading(m1)                           # Module 3
-m4 = generate_report(m1, m2, m3)                 # Module 4
+**Input:** the `outputs/<id>.json` files — needs `quality` (Module 2) and
+`fading_analysis` (Module 3) already present.
+
+**Condition score** — a single deterministic 0–100 score from a weighted blend of
+all signals. Weights live in `WEIGHTS` at the top of the file (change one line to
+retune):
+
+| Signal | Source | Weight |
+|---|---|---|
+| Fading | `fading_analysis.fading` | 0.35 |
+| Cleanliness (noise) | `analysis.noise_sigma` | 0.20 |
+| Contrast | `quality.contrast` | 0.20 |
+| Brightness (deviation from mid-tone) | `quality.brightness` | 0.15 |
+| Sharpness | `quality.blur` | 0.10 |
+
+Sharpness is weighted low on purpose: Module 2 measures it on the *denoised*
+image, so it understates real detail.
+
+- **Condition label:** Excellent ≥80 · Good 65–79 · Fair 50–64 · Poor 35–49 · Critical <35
+- **Restoration priority:** High <50 · Medium 50–69 · Low ≥70
+
+**Narrative (hybrid):** the score / priority / issues are pure Python; the
+plain-English verdict is written by an **LLM via OpenRouter** if a key is set,
+otherwise a rule-based template is used. The LLM call uses only the standard
+library (no extra pip install) and is wrapped so the pipeline never hard-fails.
+To enable it, create a `.env` in the project root (`.env` is git-ignored):
+```
+OPENROUTER_API_KEY=sk-or-...
+LLM_MODEL=deepseek/deepseek-v4-flash
 ```
 
-### Note on the LLM / orchestration requirement
-Modules 3 (object tagging / captioning) and 4 (report writing) are the parts that
-use an **LLM API**. Modules 1 and 2 are pure image processing — no LLM needed.
-The "orchestration tool" mentioned for the project is what drives `main.py`'s loop
-and holds the LLM calls. Confirm the exact tool/spelling with the lecturer before
-wiring it up.
+**Output** — a `report` block written back into each JSON, plus two PNGs in
+`outputs/reports/`:
+- `<id>_card.png` — per-photo report card (photo + quality bars + fading badge +
+  condition, priority, recommendation). The card shows a trimmed narrative; the
+  full text stays in the JSON.
+- `dashboard.png` — whole-archive ranking: High/Medium/Low counts + a
+  "top N to restore first" table.
+
+```json
+"report": {
+  "condition_score": 47,
+  "condition_label": "Poor",
+  "priority": "High",
+  "issues": ["Severe fading", "Blur / soft detail"],
+  "subscores": { "fading": 10, "cleanliness": 89, "contrast": 47, "brightness": 100, "sharpness": 11 },
+  "narrative": "The scan is in poor condition ...",
+  "narrative_source": "openrouter:deepseek/deepseek-v4-flash",
+  "card_path": "outputs/reports/<id>_card.png"
+}
+```
+
+Run Module 4 on all metadata:
+```bash
+python report_generator.py --meta outputs             # cards + dashboard
+python report_generator.py --meta outputs --no-llm    # force template (no API)
+python report_generator.py --meta outputs --no-render # scores only, no PNGs
+```
+
+**For the Telegram bot** — Module 4 is decoupled, so the bot just calls two
+functions:
+```python
+from report_generator import generate_report, generate_dashboard
+
+# on a photo upload (after running Modules 1–3 to build `meta`):
+report = generate_report(meta)        # -> {"card_path", "narrative", "priority", ...}
+bot.send_photo(report["card_path"]); bot.send_message(report["narrative"])
+
+# on /rank:
+bot.send_photo(generate_dashboard(all_metas))   # ranked dashboard image
+```
+
+### `main.py` — orchestrator
+Runs the whole pipeline (Modules 1 → 4) over a folder of images and writes results
+back into `outputs/<id>.json` as it goes, rendering the report cards + dashboard at
+the end:
+```bash
+python main.py                         # full pipeline on data/raw
+python main.py --skip-preprocessing    # re-run Modules 2–4 on existing outputs/*.json
+```
+
+### Note on the LLM
+Module 4 uses an **LLM (via OpenRouter)** to write the human-readable restoration
+narrative; everything else (scores, priority, fading, quality) is pure image
+processing with no LLM. Module 3's object tags are currently simple OpenCV
+heuristics (edge density + face detection), not an LLM — that's the obvious place
+to upgrade to a vision model later. The Telegram bot / Hermes skill that fronts the
+pipeline is built by the integration owner.
 
 ---
 
@@ -274,6 +342,9 @@ wiring it up.
 ```
 opencv-python
 numpy
+matplotlib        # Module 4: report cards + dashboard
 ```
-Modules 3 and 4 will additionally need an LLM SDK (e.g. the Anthropic / OpenAI
-client) once those are implemented.
+The Module 4 LLM narrative calls **OpenRouter** using only Python's standard
+library (`urllib`) — no extra SDK to install. Set `OPENROUTER_API_KEY` and
+`LLM_MODEL` in a `.env` file to enable it; without them Module 4 falls back to a
+rule-based template and runs fully offline.

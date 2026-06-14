@@ -1,2 +1,10 @@
 opencv-python>=4.8
 numpy>=1.24
+
+# Module 4 (report_generator.py)
+matplotlib>=3.7          # renders the report cards and dashboard PNGs
+
+# The LLM narrative in Module 4 calls OpenRouter using only the Python standard
+# library (urllib), so no extra package is needed. Set OPENROUTER_API_KEY and
+# LLM_MODEL in a .env file to enable it; without them Module 4 falls back to a
+# rule-based template and runs fully offline.
