@@ -1,0 +1,4 @@
+interface:
+  display_name: "Archive Photo Triage"
+  short_description: "Assess uploaded archival photos and return restoration reports."
+  default_prompt: "Use this skill when a Telegram/OpenClaw user uploads old archival photo(s). Run the archive photo assistant pipeline and return exactly one final Telegram-ready report message only."

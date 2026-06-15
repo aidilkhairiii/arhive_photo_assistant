@@ -1,0 +1,18 @@
+[Unit]
+Description=Archive Photo Assistant Direct Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__APP_USER__
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=__APP_DIR__/.env
+Environment=MPLCONFIGDIR=/tmp/archive_photo_assistant_mpl
+Environment=XDG_CACHE_HOME=/tmp/archive_photo_assistant_cache
+ExecStart=__APP_DIR__/venv/bin/python __APP_DIR__/telegram_bot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

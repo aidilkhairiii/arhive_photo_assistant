@@ -183,41 +183,62 @@ def analyze_fading(image: np.ndarray, is_grayscale: bool) -> str:
 
 
 def extract_basic_tags(image: np.ndarray) -> List[str]:
-    """Placeholder for object tagging. Returns basic scene tags based on image characteristics.
-    
-    This can be extended later with an LLM vision API. Currently uses simple heuristics.
+    """Return archive-friendly descriptive tags using lightweight CV heuristics.
+
+    The tags are intentionally conservative. They are meant for first-pass
+    catalogue grouping, not final historical attribution.
     """
-    tags = []
-    
-    # Basic image characteristics that can hint at content
+    tags: list[str] = []
+
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    
-    # Edge detection to guess complexity
+    mean_brightness = float(gray.mean())
+    contrast = float(gray.std())
+
     edges = cv2.Canny(gray, 50, 150)
-    edge_density = np.mean(edges) / 255
-    
-    # Detect faces (basic people detection)
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    edge_density = float(np.mean(edges) / 255.0)
+
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
     faces = face_cascade.detectMultiScale(gray, 1.1, 4)
-    if len(faces) > 0:
-        tags.append("people")
-    
-    # Guess based on edge complexity
-    if edge_density > 0.15:
-        tags.append("building")  # Buildings have lots of edges
-        tags.append("architecture")
-    elif edge_density > 0.08:
-        tags.append("street")
-        tags.append("outdoor")
-    else:
+    if len(faces) == 1:
         tags.append("portrait")
-        tags.append("indoor")
-    
-    # If no tags were added, provide a default
-    if not tags:
-        tags = ["scene", "archival"]
-        
-    return list(set(tags))  # Remove duplicates
+    elif len(faces) > 1:
+        tags.append("group_photo")
+
+    if edge_density > 0.13:
+        tags.append("building")
+    elif edge_density > 0.08:
+        tags.append("outdoor")
+
+    # Document/handwriting guess: many small dark components on a brighter page.
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    _, text_mask = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    contours, _ = cv2.findContours(text_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    small_marks = 0
+    line_like_marks = 0
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        area = w * h
+        if 6 <= area <= 600 and 2 <= w <= 80 and 2 <= h <= 40:
+            small_marks += 1
+            if w > h * 2:
+                line_like_marks += 1
+
+    if mean_brightness > 110 and contrast > 25 and small_marks > 70:
+        tags.append("document")
+        if small_marks > 130 and line_like_marks < small_marks * 0.45:
+            tags.append("handwritten")
+
+    if "outdoor" not in tags and "document" not in tags:
+        tags.append("indoor" if mean_brightness < 105 else "outdoor")
+
+    if not any(tag in tags for tag in ("portrait", "group_photo", "building", "document")):
+        tags.append("historical_object")
+
+    ordered: list[str] = []
+    for tag in tags:
+        if tag not in ordered:
+            ordered.append(tag)
+    return ordered
 
 
 def assess_fading(

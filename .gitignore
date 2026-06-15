@@ -8,3 +8,5 @@ outputs/
 *.npy
 Instructions.pdf
 .env
+.DS_Store
+*.pem

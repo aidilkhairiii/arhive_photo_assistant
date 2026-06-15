@@ -10,7 +10,7 @@ produced by Modules 1-3 (which already filled in ``quality`` and
 ``fading_analysis``) and turns those raw numbers into a DECISION:
 
     1. a single 0-100 ``condition_score`` (weighted blend of all signals),
-    2. a ``condition_label``  (Excellent / Good / Fair / Poor / Critical),
+    2. a ``condition_label``  (Excellent / Good / Fair / Poor),
     3. a restoration ``priority``  (High / Medium / Low),
     4. a plain-English ``narrative``  ("what is wrong + what to do next"),
     5. a VISUAL report card  (PNG)  -> one per photo, and
@@ -197,9 +197,7 @@ def condition_label(score: int) -> str:
         return "Good"
     if score >= 50:
         return "Fair"
-    if score >= 35:
-        return "Poor"
-    return "Critical"
+    return "Poor"
 
 
 def priority_from_score(score: int) -> str:
@@ -619,8 +617,8 @@ def generate_report(metadata: dict[str, Any], out_dir: str | Path = REPORTS_DIR,
                     use_llm: bool = True) -> dict[str, Any]:
     """Telegram-friendly entry point: build + render one photo's report.
 
-    Returns the report dict, including ``card_path`` and ``narrative`` so a bot
-    can do: send_photo(report["card_path"]); send_text(report["narrative"]).
+    Returns the report dict, including ``card_path`` and ``narrative``. The
+    Telegram/OpenClaw layer should format these values into one final response.
     """
     return build_report(metadata, out_dir=out_dir, render=True, use_llm=use_llm)
 

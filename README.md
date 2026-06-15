@@ -62,15 +62,82 @@ for the rest of the team. For **every** image it performs:
 .
 ├── preprocessing.py        # Module 1 (done)
 ├── quality_assestment.py   # Module 2 (done)
-├── fading_analysis.py      # Module 3 (empty)
-├── report_generator.py     # Module 4 (empty)
-├── main.py                 # orchestrator (empty)
+├── fading_analysis.py      # Module 3 (done)
+├── report_generator.py     # Module 4 (done)
+├── main.py                 # orchestrator (done)
 ├── requirements.txt
+├── skills/
+│   └── archive-photo-triage/
+│       ├── SKILL.md        # OpenClaw skill for Telegram photo uploads
+│       └── scripts/
+│           └── run_archive_photo_pipeline.py
 ├── data/
 │   ├── raw/                # <-- put dataset images here
 │   └── processed/          # Module 1 writes processed images here
-└── outputs/                # Module 1 writes one <id>.json per image here
+└── outputs/                # metadata, reports, dashboards, catalogues
 ```
+
+---
+
+## Bulk collection workflow
+
+The upgraded assistant supports both one-photo reports and batch catalogue
+generation for museum, archive, and history-student workflows.
+
+### One photo
+
+```bash
+python skills/archive-photo-triage/scripts/run_archive_photo_pipeline.py --image path/to/photo.jpg
+```
+
+Output:
+- report-card PNG
+- condition score from 0 to 100
+- condition category: Excellent, Good, Fair, or Poor
+- quality metrics: blur/sharpness, brightness, contrast
+- fading/color degradation analysis
+- archive-friendly tags
+- restoration recommendation
+
+### Batch of up to 20 photos
+
+```bash
+python skills/archive-photo-triage/scripts/run_archive_photo_pipeline.py \
+  --images path/photo01.jpg path/photo02.jpg path/photo03.jpg \
+  --no-llm
+```
+
+The batch runner continues if one image fails. It returns JSON shaped for
+Telegram display, CSV export, and future database storage:
+
+```json
+{
+  "batch_summary": {},
+  "priority_ranking": [],
+  "categories": {},
+  "images": []
+}
+```
+
+It also writes:
+- `outputs/catalogues/<batch_id>_catalogue.json`
+- `outputs/catalogues/<batch_id>_catalogue.csv`
+- per-image metadata JSON files
+- per-image report-card PNG files
+
+The batch output is designed to answer archive workflow questions:
+- Which images need restoration first?
+- Which photos are People, Buildings, Documents, Objects, or Scenes?
+- How many items are Excellent, Good, Fair, or Poor?
+- What is the recommended restoration order?
+
+Telegram album uploads are supported by `telegram_bot.py`: upload up to 20
+images together and the bot waits briefly after the last received image before
+processing. This helps avoid partial batches when Telegram delivers a large
+selection in chunks.
+
+The bot responds with exactly one final message containing the collection
+summary, restoration priority ranking, category groups, and catalogue note.
 
 ---
 
@@ -234,13 +301,16 @@ python quality_assestment.py --meta outputs --no-write
 Read `processed_color_path` (color is required for fading), **crop to
 `content_box`**, then compute and return:
 ```json
-{ "fading": "Moderate", "tags": ["building", "people", "street"] }
+{ "fading": "Moderate", "tags": ["building", "outdoor", "historical_object"] }
 ```
 - Fading: analyze the color histogram / saturation; classify None / Mild / Moderate / Severe.
   **Check `is_grayscale` first** — if true, there's no colour to fade, so use a
   tonal/sepia-based judgement instead of saturation.
-- Tags: currently simple OpenCV heuristics (edge density + Haar face detection).
-  Swapping in an LLM vision API is a future upgrade.
+- Tags: currently simple OpenCV heuristics (edge density, face detection, and
+  document-like mark detection). Tags are archive-friendly labels such as
+  `portrait`, `group_photo`, `building`, `document`, `handwritten`, `outdoor`,
+  `indoor`, and `historical_object`. Swapping in a vision model is a future
+  upgrade.
 
 ### Module 4 — `report_generator.py`
 Module 4 is the final stage. It reads each metadata JSON (with Module 1–3 results
@@ -265,7 +335,7 @@ retune):
 Sharpness is weighted low on purpose: Module 2 measures it on the *denoised*
 image, so it understates real detail.
 
-- **Condition label:** Excellent ≥80 · Good 65–79 · Fair 50–64 · Poor 35–49 · Critical <35
+- **Condition label:** Excellent ≥80 · Good 65–79 · Fair 50–64 · Poor <50
 - **Restoration priority:** High <50 · Medium 50–69 · Low ≥70
 
 **Narrative (hybrid):** the score / priority / issues are pure Python; the
@@ -313,10 +383,10 @@ from report_generator import generate_report, generate_dashboard
 
 # on a photo upload (after running Modules 1–3 to build `meta`):
 report = generate_report(meta)        # -> {"card_path", "narrative", "priority", ...}
-bot.send_photo(report["card_path"]); bot.send_message(report["narrative"])
+telegram_reply = report["narrative"]  # return one final Telegram message
 
 # on /rank:
-bot.send_photo(generate_dashboard(all_metas))   # ranked dashboard image
+dashboard_path = generate_dashboard(all_metas)  # generated file path for later use
 ```
 
 ### `main.py` — orchestrator
@@ -360,11 +430,109 @@ and the archive dashboard (`outputs/reports/dashboard.png`).
 
 Two deliverables remain.
 
-### A. Telegram bot — *(Tool / Integration Developer)*
+### A. Telegram / OpenClaw skill — *(done)*
 
-The pipeline is decoupled from Telegram on purpose. The bot is a thin wrapper: run
-Modules 1–3 to build the metadata dict, then call Module 4. The per-user flow is
-**one photo in → one report out**.
+The OpenClaw skill is in `skills/archive-photo-triage/SKILL.md`. It is designed
+for these user flows:
+
+Single-image flow:
+1. User sends one photo in Telegram.
+2. OpenClaw saves or locates the uploaded image file.
+3. OpenClaw runs the local one-photo runner.
+4. The user receives exactly one final condition report message.
+
+Batch flow:
+1. User uploads up to 20 photos in Telegram.
+2. OpenClaw saves or locates every uploaded image file.
+3. OpenClaw runs the batch runner.
+4. The user receives a collection summary, restoration-priority ranking,
+   category groups, and catalogue note in exactly one final message.
+
+One-photo command:
+```bash
+python skills/archive-photo-triage/scripts/run_archive_photo_pipeline.py --image path/to/uploaded_photo.jpg --telegram-text
+```
+
+Batch command:
+```bash
+python skills/archive-photo-triage/scripts/run_archive_photo_pipeline.py --images photo1.jpg photo2.jpg photo3.jpg --no-llm --telegram-text
+```
+
+For Telegram/OpenClaw, `--telegram-text` prints the single final message to
+return. Without `--telegram-text`, the command prints JSON containing the exact
+files/results:
+```json
+{
+  "status": "ok",
+  "metadata_path": "outputs/<id>.json",
+  "card_path": "outputs/reports/<id>_card.png",
+  "condition_score": 47,
+  "condition_label": "Poor",
+  "priority": "High",
+  "issues": ["Severe fading", "Blur / soft detail"],
+  "quality": { "blur": 75, "brightness": 68, "contrast": 52 },
+  "fading_analysis": { "fading": "Moderate", "tags": ["building", "street"] },
+  "narrative": "Plain-English restoration recommendation..."
+}
+```
+
+Telegram should send only the final formatted text. Do not send the report-card
+image, raw JSON, progress text, debug text, or catalogue files unless the user
+asks for files in a separate request.
+
+Archive ranking/dashboard command:
+```bash
+python skills/archive-photo-triage/scripts/run_archive_photo_pipeline.py --rank --telegram-text
+```
+
+If successful, Telegram should send the final text only. The dashboard image is
+still generated on disk for a separate file request.
+
+### B. Telegram bot runner — *(done)*
+
+The direct Telegram bot wrapper is `telegram_bot.py`.
+
+Add your Telegram token to `.env`:
+```env
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+```
+
+Install dependencies:
+```bash
+venv/bin/pip install -r requirements.txt
+```
+
+Start the bot:
+```bash
+venv/bin/python telegram_bot.py
+```
+
+Then open your bot in Telegram and send it a photo. For one photo, the bot will:
+
+1. download the uploaded image,
+2. run `skills/archive-photo-triage/scripts/run_archive_photo_pipeline.py`,
+3. send one final condition summary and narrative.
+
+For a Telegram album/batch of up to 20 images, the bot will:
+
+1. wait briefly until Telegram finishes sending the album,
+2. run the batch runner,
+3. send one final message with the collection summary, restoration-priority
+   ranking, category groups, and catalogue note.
+
+User-facing Telegram replies should stay friendly and avoid raw server paths.
+The batch runner includes `telegram_display.summary_text`,
+`telegram_display.ranking_text`, and `telegram_display.categories_text` for this
+purpose.
+
+Supported commands:
+```text
+/start  - explain what the bot does
+/help   - show help
+/rank   - update the restoration-priority dashboard after photos are processed
+```
+
+The bot wrapper itself can still use this direct Python pattern if needed:
 
 ```python
 from preprocessing import preprocess_upload
@@ -377,37 +545,89 @@ meta = preprocess_upload(file_bytes, filename, "data/processed")  # Module 1
 meta["quality"] = assess_quality(meta)                            # Module 2
 meta = update_metadata_with_fading(meta)                          # Module 3
 report = generate_report(meta)                                    # Module 4
-bot.send_photo(report["card_path"])      # the report-card image
-bot.send_message(report["narrative"])    # full plain-English verdict
+telegram_reply = report["narrative"]    # one final plain-English verdict
 
 # --- on /rank (optional, whole archive) ---
 import glob, json
 metas = [json.load(open(f)) for f in glob.glob("outputs/*.json")]
-bot.send_photo(generate_dashboard(metas))
+dashboard_path = generate_dashboard(metas)
 ```
 
-To do:
-- Pick a library (e.g. `python-telegram-bot`) and add it to `requirements.txt`.
-- Put the bot token in `.env` (already git-ignored) as `TELEGRAM_BOT_TOKEN`.
-- Handle bad input: `preprocess_upload` returns `{"status": "error", ...}` for a
-  corrupt / non-image upload — reply with a friendly message instead of crashing.
+### C. Hermes/OpenClaw skill file — *(done)*
 
-### B. Hermes/OpenClaw skill file — *(Skill Workflow Designer)*
-
-This is the assignment's main graded artifact and does **not exist yet**. It must
-include all nine sections (Instructions.pdf §6A). Mapped to this project:
+The skill file includes the required project mapping:
 
 | Required section | What to write |
 |---|---|
 | Skill name | e.g. "Archive Photo Triage Assistant" |
 | Target user | History / museum archivists with large scanned-photo collections |
 | Real-world problem | Which of hundreds of old photos should be restored first? |
-| Input format | One photo per message (JPG/PNG); optional `/rank` over a set |
+| Input format | One photo, or up to 20 photos per batch (JPG/PNG/BMP/TIFF/WEBP); optional `/rank` over a set |
 | CV / image-processing method | resize · grayscale · denoise (NLM) · Laplacian sharpness · brightness / contrast · colour-saturation & tonal fading · edge/face heuristics → weighted condition score |
-| Step-by-step workflow | preprocess → quality → fading → report card + priority |
-| Output format | report-card image + narrative; `/rank` dashboard |
+| Step-by-step workflow | preprocess → quality → fading/tags → report card or batch catalogue → priority ranking |
+| Output format | one final Telegram text report; generated report cards, catalogues, and dashboards stay on disk unless requested separately |
 | Limitation handling | low-confidence tags; denoising hides true sharpness; no expert judgement |
 | Ethical boundary | screening aid only, not a substitute for expert inspection; does not judge content or people |
+
+### D. Cloud hosting — OpenClaw + Telegram
+
+Deployment files are in `deployment/`.
+
+Default production mode is:
+
+```text
+Telegram user -> OpenClaw Gateway -> archive-photo-triage skill -> local pipeline runner -> one final report message
+```
+
+Important: only one process can poll the same Telegram bot token. Use either
+OpenClaw Gateway or `telegram_bot.py`, not both at the same time.
+
+Before deployment, make sure `.env` contains:
+```env
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+OPENROUTER_API_KEY=optional_openrouter_key
+LLM_MODEL=deepseek/deepseek-v4-flash
+```
+
+Deploy from this laptop to the cloud server:
+```bash
+cd /Users/aidilkhairi/Desktop/arhive_photo_assistant
+deployment/deploy_to_cloud.sh ubuntu@YOUR_SERVER_IP /Users/aidilkhairi/Downloads/aidilkey.pem --include-env
+```
+
+If your server user is not `ubuntu`, replace it with the correct one, e.g.
+`ec2-user@YOUR_SERVER_IP`.
+
+What the deploy script does:
+- copies this project to `/opt/archive_photo_assistant`
+- installs Python dependencies
+- installs Node.js 22 if needed
+- installs OpenClaw
+- writes OpenClaw Telegram config to `~/.openclaw/openclaw.json`
+- enables the `archive-photo-openclaw` system service
+
+Check OpenClaw service on the server:
+```bash
+sudo systemctl status archive-photo-openclaw --no-pager
+sudo journalctl -u archive-photo-openclaw -f
+```
+
+Pair the Telegram DM after the service starts:
+```bash
+openclaw pairing list telegram
+openclaw pairing approve telegram <CODE>
+```
+
+Fallback mode, if you want the direct Python Telegram bot instead of OpenClaw:
+```bash
+MODE=telegram-bot deployment/deploy_to_cloud.sh ubuntu@YOUR_SERVER_IP /Users/aidilkhairi/Downloads/aidilkey.pem --include-env
+```
+
+Then check:
+```bash
+sudo systemctl status archive-photo-telegram --no-pager
+sudo journalctl -u archive-photo-telegram -f
+```
 
 ### Before you touch the code — things to know
 
@@ -420,7 +640,7 @@ include all nine sections (Instructions.pdf §6A). Mapped to this project:
 - The JSON quality key is **`blur`** but it holds the *sharpness* score (a
   half-finished rename). Read `quality["blur"]`.
 - The card shows a **trimmed** narrative; the **full** text is in
-  `report.narrative` — send that as the Telegram caption.
+  `report.narrative` and is included in the final Telegram message.
 - Running **many** LLM narratives back-to-back can hit OpenRouter rate limits (the
   batch retries automatically). The live one-photo demo will not.
 - Regenerate everything: `python main.py`. Re-run only Modules 2–4 on existing

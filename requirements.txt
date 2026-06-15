@@ -3,6 +3,7 @@ numpy>=1.24
 
 # Module 4 (report_generator.py)
 matplotlib>=3.7          # renders the report cards and dashboard PNGs
+python-telegram-bot>=22.0 # Telegram bot wrapper for photo uploads
 
 # The LLM narrative in Module 4 calls OpenRouter using only the Python standard
 # library (urllib), so no extra package is needed. Set OPENROUTER_API_KEY and

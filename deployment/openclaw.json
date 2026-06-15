@@ -1,0 +1,39 @@
+{
+  "gateway": {
+    "mode": "local"
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "openrouter/deepseek/deepseek-v4-flash"
+      },
+      "models": {
+        "openrouter/deepseek/deepseek-v4-flash": {}
+      }
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "dmPolicy": "pairing",
+      "groups": {
+        "*": {
+          "requireMention": true
+        }
+      },
+      "customCommands": [
+        {
+          "command": "rank",
+          "description": "Generate archive restoration ranking"
+        }
+      ]
+    }
+  },
+  "messages": {
+    "groupChat": {
+      "mentionPatterns": [
+        "@ArchivePhotoTriageBot"
+      ]
+    }
+  }
+}
