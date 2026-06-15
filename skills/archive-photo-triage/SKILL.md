@@ -1,19 +1,20 @@
 ---
 name: archive-photo-triage
-description: Use when an OpenClaw or Telegram user uploads an old, archival, scanned, damaged, faded, blurry, or historical photo and wants the Archive Photo Assistant pipeline to assess condition, restoration priority, quality, fading, tags, report-card image, narrative, metadata JSON, or archive ranking dashboard.
+description: Use when an OpenClaw or Telegram user uploads old, archival, scanned, damaged, faded, blurry, or historical photos and wants the Historical Archive Management Assistant to assess condition, catalogue items, estimate research value, prioritize restoration, recommend actions, or build archive metadata.
 ---
 
-# Archive Photo Triage
+# Historical Archive Management Assistant
 
 ## Purpose
 
-Handle the Telegram-facing Archive Photo Assistant workflow:
+Handle the Telegram-facing Historical Archive Management Assistant workflow:
 
 1. User sends one archival photo, or a batch of up to 20 photos, in Telegram.
 2. OpenClaw saves or accesses the uploaded image file(s).
-3. Run the local Archive Photo Assistant pipeline.
-4. For one image, return one final plain-English condition report.
-5. For a batch, return one final collection summary with restoration ranking and category groups.
+3. Run the local archive management pipeline.
+4. For one image, return one final plain-English archive-management report.
+5. For a batch, return one final collection report with restoration ranking,
+   category groups, research value, metadata summary, and recommended actions.
 
 The skill should use the existing project modules. Do not reimplement blur,
 brightness, contrast, fading, scoring, or report rendering in the chat layer.
@@ -22,22 +23,26 @@ brightness, contrast, fading, scoring, or report rendering in the chat layer.
 
 Use these details when explaining or presenting the OpenClaw skill:
 
-- Skill name: Archive Photo Triage Assistant
-- Target user: history, museum, archive, and heritage staff who need to screen
-  scanned old photographs.
-- Real-world problem: the user has many old photos and needs to know which ones
-  should be restored first.
+- Skill name: Historical Archive Management Assistant
+- Target user: history students, museum studies students, archivists,
+  educators, archive managers, and heritage staff who need to organize scanned
+  historical photographs.
+- Real-world problem: the user has many old photos and needs to know how to
+  catalogue, prioritize, preserve, and manage the collection.
 - Input format: one image, or up to 20 images in one Telegram batch, as JPG, PNG, BMP, TIFF, or WEBP.
 - CV/image-processing method: resize, grayscale, denoise, content-box crop,
   Laplacian sharpness, brightness mean, contrast standard deviation, color or
   tonal fading analysis, simple image tags, weighted condition score.
 - Step-by-step workflow: upload photo, preprocess, assess quality, analyze
-  fading, generate report data, then return one final Telegram-ready message.
-- Output format for one image: one final text response with condition score,
-  priority summary, quality, fading, tags, issues, and plain-English narrative.
+  fading, reuse existing tags, generate catalogue data, estimate research value,
+  recommend preservation actions, then return one final Telegram-ready message.
+- Output format for one image: one final text response with collection summary,
+  restoration priority, category breakdown, research value, metadata summary,
+  recommended action, and plain-English narrative.
 - Output format for a batch: JSON object with `batch_summary`,
-  `priority_ranking`, `categories`, and `images`; the Telegram response should
-  summarize those results in one message.
+  `priority_ranking`, `research_ranking`, `categories`, `metadata_table`, and
+  `images`; the Telegram response should summarize those results in one
+  message.
 - Limitation handling: tags are guesses, denoising may reduce true sharpness,
   and bad uploads return a friendly error.
 - Ethical boundary: screening aid only; not a replacement for expert archival
@@ -80,7 +85,7 @@ developer log.
 Use this tone:
 
 ```text
-Analysis complete.
+Collection Summary
 I checked 4 photos. Restore first: photo12.jpg because it has severe fading and low contrast.
 
 Condition mix:
@@ -88,7 +93,7 @@ Poor: 2, Good: 2
 
 Collection groups:
 People Collection: 3
-Buildings Collection: 1
+Architecture Collection: 1
 Documents Collection: 1
 ```
 
@@ -101,7 +106,9 @@ Avoid:
   physical damage. The pipeline measures scan/image condition only.
 
 For batch output, prefer the runner's `telegram_display.summary_text`,
-`telegram_display.ranking_text`, and `telegram_display.categories_text`.
+`telegram_display.ranking_text`, `telegram_display.categories_text`,
+`telegram_display.research_text`, `telegram_display.metadata_text`, and
+`telegram_display.actions_text`.
 Combine them into one final Telegram message. Do not attach report cards,
 catalogue files, debug logs, progress messages, or tool output unless the user
 asks for files in a separate request.
@@ -136,12 +143,23 @@ When the Telegram user uploads a JPG, JPEG, PNG, BMP, TIFF, or WEBP photo:
 Use this one-message format in Telegram:
 
 ```text
-Condition: <condition_label> (<condition_score>/100)
-Priority: <priority>
-Issues: <comma-separated issues>
-Fading: <fading>
-Quality: blur <blur>, brightness <brightness>, contrast <contrast>
-Tags: <comma-separated tags>
+Collection Summary
+Analysis complete for 1 photo.
+
+Restoration Priority Ranking
+1. <file_name> - <priority> priority. <reason>.
+
+Category Breakdown
+- <category>
+
+Top Research-Relevant Images
+1. <file_name> - <research_value> research value.
+
+Metadata Summary
+- <file_name>: <condition> | <priority> priority | <research_value> research | <recommended_action>
+
+Recommended Actions
+- <recommended_action>: <reason>
 
 <narrative>
 ```
@@ -158,6 +176,9 @@ When the Telegram user uploads multiple images together:
    - `telegram_display.summary_text`
    - `telegram_display.ranking_text`
    - `telegram_display.categories_text`
+   - `telegram_display.research_text`
+   - `telegram_display.metadata_text`
+   - `telegram_display.actions_text`
    - a short note that catalogue JSON/CSV files were prepared
 
 The batch runner returns:
@@ -175,9 +196,19 @@ The batch runner returns:
       "Fair": 7,
       "Poor": 4
     },
+    "priority_distribution": {
+      "HIGH": 4,
+      "MEDIUM": 10,
+      "LOW": 5
+    },
+    "research_value_distribution": {
+      "HIGH": 6,
+      "MEDIUM": 9,
+      "LOW": 4
+    },
     "category_distribution": {
       "People Collection": 8,
-      "Buildings Collection": 4,
+      "Architecture Collection": 4,
       "Documents Collection": 3
     },
     "high_priority_items": [],
@@ -186,7 +217,9 @@ The batch runner returns:
     "catalogue_csv_path": "outputs/catalogues/batch_20260615_010000_catalogue.csv"
   },
   "priority_ranking": [],
+  "research_ranking": [],
   "categories": {},
+  "metadata_table": [],
   "images": [],
   "failures": []
 }
@@ -202,6 +235,8 @@ Each item in `images` is a catalogue entry:
   "condition_score": 41,
   "condition_category": "Poor",
   "restoration_priority": "HIGH",
+  "research_value": "HIGH",
+  "recommended_action": "Immediate Preservation Recommended",
   "priority_reason": "severe fading and low contrast"
 }
 ```

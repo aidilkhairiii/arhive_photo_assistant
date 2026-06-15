@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Archive Photo Assistant for one uploaded image or build the dashboard."""
+"""Run Historical Archive Management for uploaded images or dashboard updates."""
 
 from __future__ import annotations
 
@@ -33,13 +33,16 @@ from telegram_formatting import format_telegram_result  # noqa: E402
 SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 MAX_BATCH_IMAGES = 20
 PRIORITY_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+RESEARCH_VALUE_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
 CATEGORY_RULES = {
     "People Collection": {"portrait", "group_photo"},
-    "Buildings Collection": {"building", "monument"},
+    "Architecture Collection": {"building", "monument"},
     "Documents Collection": {"document", "handwritten"},
     "Objects Collection": {"vehicle", "historical_object"},
     "Scenes Collection": {"outdoor", "indoor", "ceremony"},
 }
+HIGH_RESEARCH_TAGS = {"building", "document", "handwritten", "group_photo"}
+MEDIUM_RESEARCH_TAGS = {"portrait", "historical_object", "outdoor"}
 
 
 def _json_default(value: Any) -> str:
@@ -129,6 +132,62 @@ def _priority_reason(metadata: dict[str, Any]) -> str:
     )
 
 
+def _research_value(tags: list[str]) -> tuple[str, str]:
+    """Estimate research value from existing visible-content tags only."""
+    tag_set = set(tags)
+    high_matches = sorted(tag_set & HIGH_RESEARCH_TAGS)
+    if high_matches:
+        return (
+            "HIGH",
+            f"Detected tags suggest strong research use: {', '.join(high_matches)}.",
+        )
+
+    medium_matches = sorted(tag_set & MEDIUM_RESEARCH_TAGS)
+    if medium_matches:
+        return (
+            "MEDIUM",
+            f"Detected tags suggest contextual archive value: {', '.join(medium_matches)}.",
+        )
+
+    return (
+        "LOW",
+        "Detected tags do not indicate a high-value research category yet.",
+    )
+
+
+def _recommended_action(
+    condition_category: str,
+    restoration_priority: str,
+    research_value: str,
+    priority_score: int,
+) -> tuple[str, str]:
+    """Return a preservation action focused on what the user should do next."""
+    if restoration_priority == "HIGH" and (
+        condition_category == "Poor" or research_value == "HIGH" or priority_score >= 75
+    ):
+        return (
+            "Immediate Preservation Recommended",
+            "Stabilize and review soon because condition risk and collection value are both significant.",
+        )
+
+    if restoration_priority == "HIGH" or condition_category == "Poor":
+        return (
+            "Restoration Recommended",
+            "Add this item to the restoration queue before lower-risk archive-only items.",
+        )
+
+    if restoration_priority == "MEDIUM" or research_value == "HIGH":
+        return (
+            "Digitize Soon",
+            "Prioritize a clean digital copy and catalogue record before routine storage.",
+        )
+
+    return (
+        "Archive Only",
+        "Store with normal catalogue controls and revisit after higher-priority items.",
+    )
+
+
 def _catalogue_description(metadata: dict[str, Any]) -> str:
     report = metadata.get("report", {})
     fading = metadata.get("fading_analysis", {}).get("fading", "Unknown")
@@ -159,6 +218,13 @@ def _catalogue_entry(metadata: dict[str, Any], metadata_path: Path) -> dict[str,
     priority_score = _priority_score(metadata)
     priority = _priority_level(priority_score)
     categories = _categories_for_tags(tags)
+    research_value, research_reason = _research_value(tags)
+    recommended_action, action_reason = _recommended_action(
+        report.get("condition_label"),
+        priority,
+        research_value,
+        priority_score,
+    )
 
     return {
         "file_name": metadata.get("source_file_name") or Path(metadata.get("original_path") or metadata["image_id"]).name,
@@ -172,6 +238,11 @@ def _catalogue_entry(metadata: dict[str, Any], metadata_path: Path) -> dict[str,
         "restoration_priority": priority,
         "priority_score": priority_score,
         "priority_reason": _priority_reason(metadata),
+        "research_value": research_value,
+        "research_reason": research_reason,
+        "recommended_action": recommended_action,
+        "recommendation": recommended_action,
+        "action_reason": action_reason,
         "quality": metadata.get("quality", {}),
         "fading_analysis": metadata.get("fading_analysis", {}),
         "issues": report.get("issues", []),
@@ -210,10 +281,38 @@ def _rank_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "condition_score": item["condition_score"],
             "condition_category": item["condition_category"],
             "reason": item["priority_reason"],
+            "research_value": item.get("research_value"),
+            "recommended_action": item.get("recommended_action"),
             "tags": item["tags"],
             "card_path": item.get("card_path"),
         })
     return ranking
+
+
+def _rank_research_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ranked = sorted(
+        entries,
+        key=lambda item: (
+            RESEARCH_VALUE_ORDER.get(item.get("research_value", "LOW"), 9),
+            PRIORITY_ORDER.get(item.get("restoration_priority", "LOW"), 9),
+            int(item.get("condition_score") or 100),
+            item.get("file_name", ""),
+        ),
+    )
+    return [
+        {
+            "rank": index,
+            "file_name": item["file_name"],
+            "image_id": item["image_id"],
+            "research_value": item.get("research_value", "LOW"),
+            "reason": item.get("research_reason", ""),
+            "tags": item.get("tags", []),
+            "condition_category": item.get("condition_category"),
+            "restoration_priority": item.get("restoration_priority"),
+            "recommended_action": item.get("recommended_action"),
+        }
+        for index, item in enumerate(ranked, start=1)
+    ]
 
 
 def _build_categories(entries: list[dict[str, Any]]) -> dict[str, list[str]]:
@@ -224,19 +323,38 @@ def _build_categories(entries: list[dict[str, Any]]) -> dict[str, list[str]]:
     return dict(sorted(categories.items()))
 
 
+def _build_metadata_table(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "file_name": entry["file_name"],
+            "category": entry.get("primary_category"),
+            "tags": entry.get("tags", []),
+            "condition": entry.get("condition_category"),
+            "priority": entry.get("restoration_priority"),
+            "research_value": entry.get("research_value"),
+            "recommendation": entry.get("recommended_action"),
+        }
+        for entry in entries
+    ]
+
+
 def _build_batch_summary(
     batch_id: str,
     total_images: int,
     entries: list[dict[str, Any]],
     failures: list[dict[str, Any]],
     ranking: list[dict[str, Any]],
+    research_ranking: list[dict[str, Any]],
     categories: dict[str, list[str]],
     catalogue_json_path: Path,
     catalogue_csv_path: Path,
 ) -> dict[str, Any]:
     condition_distribution = Counter(entry["condition_category"] for entry in entries)
+    priority_distribution = Counter(entry["restoration_priority"] for entry in entries)
+    research_value_distribution = Counter(entry["research_value"] for entry in entries)
     category_distribution = {category: len(images) for category, images in categories.items()}
     high_priority = [item for item in ranking if item["priority"] == "HIGH"]
+    high_research = [item for item in research_ranking if item["research_value"] == "HIGH"]
 
     return {
         "batch_id": batch_id,
@@ -249,8 +367,22 @@ def _build_batch_summary(
             "Fair": condition_distribution.get("Fair", 0),
             "Poor": condition_distribution.get("Poor", 0),
         },
+        "priority_distribution": {
+            "HIGH": priority_distribution.get("HIGH", 0),
+            "MEDIUM": priority_distribution.get("MEDIUM", 0),
+            "LOW": priority_distribution.get("LOW", 0),
+        },
+        "research_value_distribution": {
+            "HIGH": research_value_distribution.get("HIGH", 0),
+            "MEDIUM": research_value_distribution.get("MEDIUM", 0),
+            "LOW": research_value_distribution.get("LOW", 0),
+        },
         "category_distribution": category_distribution,
+        "detected_categories": list(categories.keys()),
         "high_priority_items": high_priority,
+        "high_research_items": high_research,
+        "top_restoration_priorities": ranking[:5],
+        "top_research_relevant_images": research_ranking[:5],
         "recommended_restoration_order": [item["file_name"] for item in ranking],
         "catalogue_json_path": str(catalogue_json_path),
         "catalogue_csv_path": str(catalogue_csv_path),
@@ -279,6 +411,10 @@ def _write_catalogue_exports(
         "restoration_priority",
         "priority_score",
         "priority_reason",
+        "research_value",
+        "research_reason",
+        "recommended_action",
+        "action_reason",
         "metadata_path",
         "card_path",
     ]
@@ -303,7 +439,9 @@ def _format_distribution(distribution: dict[str, int]) -> str:
 def _friendly_batch_display(payload: dict[str, Any]) -> dict[str, Any]:
     summary = payload.get("batch_summary", {})
     ranking = payload.get("priority_ranking", [])
+    research_ranking = payload.get("research_ranking", [])
     categories = payload.get("categories", {})
+    metadata_table = payload.get("metadata_table", [])
     failures = payload.get("failures", [])
     skipped = payload.get("skipped_images", [])
 
@@ -313,6 +451,7 @@ def _friendly_batch_display(payload: dict[str, Any]) -> dict[str, Any]:
     failed = summary.get("failed_images", 0)
 
     summary_lines = [
+        "Collection Summary",
         "Analysis complete.",
         f"I checked {processed} of {total} photo(s).",
     ]
@@ -329,23 +468,28 @@ def _friendly_batch_display(payload: dict[str, Any]) -> dict[str, Any]:
         "",
         "Condition mix:",
         _format_distribution(summary.get("condition_distribution", {})),
+        "Priority mix:",
+        _format_distribution(summary.get("priority_distribution", {})),
+        "Research value mix:",
+        _format_distribution(summary.get("research_value_distribution", {})),
         "",
         "Collection groups:",
         _format_distribution(summary.get("category_distribution", {})),
     ])
 
-    ranking_lines = ["Recommended restoration order:"]
+    ranking_lines = ["Restoration priority ranking:"]
     if ranking:
         for item in ranking[:10]:
             ranking_lines.append(
-                f"{item['rank']}. {item['file_name']} - {item['priority']} priority. {item['reason']}."
+                f"{item['rank']}. {item['file_name']} - {item['priority']} priority. "
+                f"Action: {item.get('recommended_action')}. Reason: {item['reason']}."
             )
         if len(ranking) > 10:
             ranking_lines.append(f"...and {len(ranking) - 10} more item(s) in the catalogue.")
     else:
         ranking_lines.append("No successful images were available to rank.")
 
-    category_lines = ["Collection categories:"]
+    category_lines = ["Category Breakdown:"]
     if categories:
         for category, files in categories.items():
             preview = ", ".join(files[:4])
@@ -358,10 +502,45 @@ def _friendly_batch_display(payload: dict[str, Any]) -> dict[str, Any]:
         failed_names = ", ".join(item.get("file_name", "unknown") for item in failures[:5])
         category_lines.append(f"\nCould not process: {failed_names}")
 
+    research_lines = ["Top Research-Relevant Images:"]
+    if research_ranking:
+        for item in research_ranking[:5]:
+            tag_text = ", ".join(item.get("tags", [])[:4]) or "no tags"
+            research_lines.append(
+                f"{item['rank']}. {item['file_name']} - {item['research_value']} value "
+                f"({tag_text}). {item.get('recommended_action')}."
+            )
+    else:
+        research_lines.append("No successful images were available for research ranking.")
+
+    metadata_lines = ["Metadata Summary:"]
+    if metadata_table:
+        for item in metadata_table[:8]:
+            metadata_lines.append(
+                f"- {item['file_name']}: {item['category']} | {item['condition']} | "
+                f"{item['priority']} priority | {item['research_value']} research | "
+                f"{item['recommendation']}"
+            )
+        if len(metadata_table) > 8:
+            metadata_lines.append(f"...and {len(metadata_table) - 8} more item(s) in the CSV.")
+    else:
+        metadata_lines.append("No metadata rows were created.")
+
+    actions = Counter(entry.get("recommended_action") for entry in payload.get("images", []) if entry.get("status") != "error")
+    action_lines = ["Recommended Actions:"]
+    if actions:
+        for action, count in sorted(actions.items()):
+            action_lines.append(f"- {action}: {count} item(s)")
+    else:
+        action_lines.append("- No actions available.")
+
     return {
         "summary_text": "\n".join(summary_lines),
         "ranking_text": "\n".join(ranking_lines),
         "categories_text": "\n".join(category_lines),
+        "research_text": "\n".join(research_lines),
+        "metadata_text": "\n".join(metadata_lines),
+        "actions_text": "\n".join(action_lines),
         "catalogue_note": "I prepared catalogue JSON and CSV files for download.",
         "catalogue_files": {
             "json": summary.get("catalogue_json_path"),
@@ -430,6 +609,11 @@ def _process_one_image(
         "restoration_priority": catalogue_entry["restoration_priority"],
         "priority_score": catalogue_entry["priority_score"],
         "priority_reason": catalogue_entry["priority_reason"],
+        "research_value": catalogue_entry["research_value"],
+        "research_reason": catalogue_entry["research_reason"],
+        "recommended_action": catalogue_entry["recommended_action"],
+        "recommendation": catalogue_entry["recommendation"],
+        "action_reason": catalogue_entry["action_reason"],
         "issues": report.get("issues", []),
         "quality": metadata.get("quality", {}),
         "fading_analysis": fading,
@@ -512,7 +696,9 @@ def run_batch(args: argparse.Namespace) -> dict[str, Any]:
             image_results.append(failure)
 
     ranking = _rank_entries(entries)
+    research_ranking = _rank_research_entries(entries)
     categories = _build_categories(entries)
+    metadata_table = _build_metadata_table(entries)
     catalogue_dir = (PROJECT_ROOT / args.catalogue_dir).resolve()
     placeholder_json = catalogue_dir / f"{batch_id}_catalogue.json"
     placeholder_csv = catalogue_dir / f"{batch_id}_catalogue.csv"
@@ -521,7 +707,9 @@ def run_batch(args: argparse.Namespace) -> dict[str, Any]:
         "status": "ok" if entries else "error",
         "batch_summary": {},
         "priority_ranking": ranking,
+        "research_ranking": research_ranking,
         "categories": categories,
+        "metadata_table": metadata_table,
         "images": image_results,
         "failures": failures,
         "skipped_images": skipped,
@@ -532,6 +720,7 @@ def run_batch(args: argparse.Namespace) -> dict[str, Any]:
         entries=entries,
         failures=failures,
         ranking=ranking,
+        research_ranking=research_ranking,
         categories=categories,
         catalogue_json_path=placeholder_json,
         catalogue_csv_path=placeholder_csv,
@@ -585,7 +774,7 @@ def run_rank(args: argparse.Namespace) -> dict[str, Any]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run Archive Photo Assistant for a Telegram/OpenClaw upload."
+        description="Run Historical Archive Management for a Telegram/OpenClaw upload."
     )
     parser.add_argument("--image", help="Path to one uploaded image.")
     parser.add_argument("--images", nargs="+", help="Paths to up to 20 uploaded images.")

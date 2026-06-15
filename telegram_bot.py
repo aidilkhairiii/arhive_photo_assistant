@@ -1,9 +1,9 @@
 """
-Telegram Bot - Archive Photo Assistant
+Telegram Bot - Historical Archive Management Assistant
 =====================================
 
-Receives photo uploads from Telegram, runs the Archive Photo Assistant pipeline,
-and sends exactly one final formatted reply back to the user.
+Receives photo uploads from Telegram, runs the archive management pipeline, and
+sends exactly one final formatted reply back to the user.
 
 Required .env:
     TELEGRAM_BOT_TOKEN=your_bot_token
@@ -159,13 +159,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await deliver_final_reply(
         context.bot,
         update.effective_chat.id,
-        "Hi! Send me one archival photo for a condition report, or upload up to "
-        "20 photos at once for a collection catalogue.\n\n"
+        "Hi! I am your Historical Archive Management Assistant. Send me one "
+        "archival photo for a preservation action report, or upload up to 20 "
+        "photos at once for a collection catalogue.\n\n"
         f"When you upload several photos, I wait about {int(BATCH_SETTLE_SECONDS)} seconds "
         "after the last image so Telegram has time to deliver the whole set.\n\n"
-        "For batches I will show a collection summary, restoration priority ranking, "
-        "and catalogue note in one final message. Use /rank after processing photos "
-        "to update the restoration-priority dashboard."
+        "For batches I will show a collection summary, restoration priority "
+        "ranking, category breakdown, research-relevant images, metadata "
+        "summary, recommended actions, and catalogue note in one final message. "
+        "Use /rank after processing photos to update the restoration-priority dashboard."
     )
 
 
@@ -219,9 +221,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await deliver_final_reply(
         context.bot,
         update.effective_chat.id,
-        "Send me one photo for a condition report, or upload up to 20 photos together "
-        "to create a collection catalogue. Use /rank to generate a dashboard after "
-        "you process photos."
+        "Send me one archival photo for a preservation action report, or upload "
+        "up to 20 photos together to create a collection catalogue with "
+        "restoration priorities, research value, and recommended actions. Use "
+        "/rank to generate a dashboard after you process photos."
     )
 
 
@@ -236,7 +239,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.Document.IMAGE, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    print("Archive Photo Assistant Telegram bot is running. Press Ctrl+C to stop.")
+    print("Historical Archive Management Telegram bot is running. Press Ctrl+C to stop.")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

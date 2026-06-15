@@ -1,4 +1,4 @@
-"""Telegram-facing text formatting for Archive Photo Assistant results.
+"""Telegram-facing text formatting for Historical Archive Management results.
 
 The analysis pipeline returns dictionaries only. This module is the single
 place that turns those dictionaries into final chat text.
@@ -43,23 +43,35 @@ def format_single_result(result: dict[str, Any]) -> str:
             f"{result.get('error', 'Please try another JPG or PNG photo.')}"
         )
 
-    quality = result.get("quality", {})
     fading = result.get("fading_analysis", {})
     issues = _join_values(result.get("issues", []), default="No major issues")
     tags = _join_values(result.get("tags") or fading.get("tags", []))
     narrative = result.get("narrative", "")
+    research_value = result.get("research_value", "Unknown")
+    recommended_action = result.get("recommended_action", "Review catalogue record")
+    action_reason = result.get("action_reason") or result.get("priority_reason", "")
 
     return (
-        "Analysis complete.\n"
+        "Collection Summary\n"
+        "Analysis complete for 1 photo.\n"
         f"Condition: {result.get('condition_label')} ({result.get('condition_score')}/100)\n"
-        f"Restoration priority: {result.get('restoration_priority', result.get('priority'))}\n"
-        f"Main issues: {issues}\n"
-        f"Fading: {fading.get('fading', 'Unknown')}\n"
-        "Quality: "
-        f"sharpness {_quality_value(quality, 'blur', 'sharpness')}, "
-        f"brightness {_quality_value(quality, 'brightness')}, "
-        f"contrast {_quality_value(quality, 'contrast')}\n"
-        f"Tags: {tags}\n\n"
+        f"Detected tags: {tags}\n\n"
+        "Restoration Priority Ranking\n"
+        f"1. {result.get('file_name', 'uploaded image')} - "
+        f"{result.get('restoration_priority', result.get('priority'))} priority. "
+        f"{result.get('priority_reason', issues)}.\n\n"
+        "Category Breakdown\n"
+        f"- { _join_values(result.get('categories', []), default='Uncategorized Collection') }\n\n"
+        "Top Research-Relevant Images\n"
+        f"1. {result.get('file_name', 'uploaded image')} - {research_value} research value. "
+        f"{result.get('research_reason', '')}\n\n"
+        "Metadata Summary\n"
+        f"- {result.get('file_name', 'uploaded image')}: "
+        f"{result.get('condition_label')} | "
+        f"{result.get('restoration_priority', result.get('priority'))} priority | "
+        f"{research_value} research | {recommended_action}\n\n"
+        "Recommended Actions\n"
+        f"- {recommended_action}: {action_reason}\n\n"
         f"{narrative}"
     ).rstrip()
 
@@ -72,6 +84,8 @@ def format_batch_summary(result: dict[str, Any]) -> str:
     summary = result.get("batch_summary", {})
     condition_distribution = summary.get("condition_distribution", {})
     category_distribution = summary.get("category_distribution", {})
+    priority_distribution = summary.get("priority_distribution", {})
+    research_distribution = summary.get("research_value_distribution", {})
     high_priority = summary.get("high_priority_items", [])
 
     condition_lines = [
@@ -97,6 +111,10 @@ def format_batch_summary(result: dict[str, Any]) -> str:
         f"{skipped_text}\n\n"
         "Condition mix:\n"
         + "\n".join(condition_lines)
+        + "\n\nPriority mix:\n"
+        + _join_values([f"{label}: {priority_distribution.get(label, 0)}" for label in ("HIGH", "MEDIUM", "LOW")])
+        + "\n\nResearch value mix:\n"
+        + _join_values([f"{label}: {research_distribution.get(label, 0)}" for label in ("HIGH", "MEDIUM", "LOW")])
         + "\n\nCollection groups:\n"
         + "\n".join(category_lines)
         + f"\n\nHigh-priority items: {len(high_priority)}"
@@ -138,6 +156,15 @@ def format_batch_result(result: dict[str, Any]) -> str:
     categories_text = display.get("categories_text")
     if categories_text:
         sections.append(categories_text)
+    research_text = display.get("research_text")
+    if research_text:
+        sections.append(research_text)
+    metadata_text = display.get("metadata_text")
+    if metadata_text:
+        sections.append(metadata_text)
+    actions_text = display.get("actions_text")
+    if actions_text:
+        sections.append(actions_text)
     catalogue_note = display.get("catalogue_note")
     if catalogue_note:
         sections.append(catalogue_note)

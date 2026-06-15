@@ -1,7 +1,9 @@
-# Archive Photo Assistant
+# Historical Archive Management Assistant
 
-A pipeline that assesses the condition of old/archival photographs and recommends
-restoration priority. The work is split into **4 modules**, one per team member:
+A pipeline that helps users manage historical photo collections: assess
+condition, catalogue items, estimate research value, prioritize restoration, and
+recommend next actions. The work is split into **4 modules**, one per team
+member:
 
 | Module | File | Owner | Status |
 |---|---|---|---|
@@ -79,10 +81,11 @@ for the rest of the team. For **every** image it performs:
 
 ---
 
-## Bulk collection workflow
+## Historical archive collection workflow
 
 The upgraded assistant supports both one-photo reports and batch catalogue
-generation for museum, archive, and history-student workflows.
+generation for history students, museum studies students, archivists,
+educators, and archive managers.
 
 ### One photo
 
@@ -94,10 +97,11 @@ Output:
 - report-card PNG
 - condition score from 0 to 100
 - condition category: Excellent, Good, Fair, or Poor
-- quality metrics: blur/sharpness, brightness, contrast
 - fading/color degradation analysis
 - archive-friendly tags
-- restoration recommendation
+- research value: HIGH, MEDIUM, or LOW
+- recommended action: Archive Only, Digitize Soon, Restoration Recommended, or
+  Immediate Preservation Recommended
 
 ### Batch of up to 20 photos
 
@@ -114,7 +118,9 @@ Telegram display, CSV export, and future database storage:
 {
   "batch_summary": {},
   "priority_ranking": [],
+  "research_ranking": [],
   "categories": {},
+  "metadata_table": [],
   "images": []
 }
 ```
@@ -127,9 +133,9 @@ It also writes:
 
 The batch output is designed to answer archive workflow questions:
 - Which images need restoration first?
-- Which photos are People, Buildings, Documents, Objects, or Scenes?
-- How many items are Excellent, Good, Fair, or Poor?
-- What is the recommended restoration order?
+- Which photos are People, Architecture, Documents, Objects, or Scenes?
+- Which images have higher research value?
+- What action should be taken next for each image?
 
 Telegram album uploads are supported by `telegram_bot.py`: upload up to 20
 images together and the bot waits briefly after the last received image before
@@ -137,7 +143,8 @@ processing. This helps avoid partial batches when Telegram delivers a large
 selection in chunks.
 
 The bot responds with exactly one final message containing the collection
-summary, restoration priority ranking, category groups, and catalogue note.
+summary, restoration priority ranking, category breakdown, top research-relevant
+images, metadata summary, recommended actions, and catalogue note.
 
 ---
 
@@ -446,7 +453,8 @@ Batch flow:
 2. OpenClaw saves or locates every uploaded image file.
 3. OpenClaw runs the batch runner.
 4. The user receives a collection summary, restoration-priority ranking,
-   category groups, and catalogue note in exactly one final message.
+   category groups, research ranking, metadata summary, recommended actions,
+   and catalogue note in exactly one final message.
 
 One-photo command:
 ```bash
@@ -469,6 +477,8 @@ files/results:
   "condition_score": 47,
   "condition_label": "Poor",
   "priority": "High",
+  "research_value": "MEDIUM",
+  "recommended_action": "Restoration Recommended",
   "issues": ["Severe fading", "Blur / soft detail"],
   "quality": { "blur": 75, "brightness": 68, "contrast": 52 },
   "fading_analysis": { "fading": "Moderate", "tags": ["building", "street"] },
@@ -518,12 +528,14 @@ For a Telegram album/batch of up to 20 images, the bot will:
 1. wait briefly until Telegram finishes sending the album,
 2. run the batch runner,
 3. send one final message with the collection summary, restoration-priority
-   ranking, category groups, and catalogue note.
+   ranking, category breakdown, research ranking, metadata summary,
+   recommended actions, and catalogue note.
 
 User-facing Telegram replies should stay friendly and avoid raw server paths.
 The batch runner includes `telegram_display.summary_text`,
-`telegram_display.ranking_text`, and `telegram_display.categories_text` for this
-purpose.
+`telegram_display.ranking_text`, `telegram_display.categories_text`,
+`telegram_display.research_text`, `telegram_display.metadata_text`, and
+`telegram_display.actions_text` for this purpose.
 
 Supported commands:
 ```text
@@ -559,7 +571,7 @@ The skill file includes the required project mapping:
 
 | Required section | What to write |
 |---|---|
-| Skill name | e.g. "Archive Photo Triage Assistant" |
+| Skill name | e.g. "Historical Archive Management Assistant" |
 | Target user | History / museum archivists with large scanned-photo collections |
 | Real-world problem | Which of hundreds of old photos should be restored first? |
 | Input format | One photo, or up to 20 photos per batch (JPG/PNG/BMP/TIFF/WEBP); optional `/rank` over a set |
