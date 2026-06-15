@@ -241,6 +241,28 @@ def extract_basic_tags(image: np.ndarray) -> List[str]:
     return ordered
 
 
+# Heavy grain fools both the fading check (noise raises tonal/saturation spread,
+# so a grainy scan looks "not faded") and the tag heuristics (noise creates fake
+# edges and text-like marks). Above this noise level, be conservative.
+NOISE_GUARD_SIGMA = 12.0
+NOISE_SENSITIVE_TAGS = ("building", "document", "handwritten")
+
+
+def _apply_noise_guard(fading: str, tags: List[str], noise_sigma: float) -> tuple[str, List[str]]:
+    """Fixes 4 & 5 — stop heavy noise from inflating the fading rating or the tags."""
+    if noise_sigma <= NOISE_GUARD_SIGMA:
+        return fading, tags
+    # Fix 4: the grainiest image must not be rated "None" (the best) for fading.
+    if fading == "None":
+        fading = "Mild"
+    # Fix 5: drop edge/texture tags that noise manufactures. These tags drive the
+    # research-value rating, so removing them stops noise inflating it.
+    guarded = [tag for tag in tags if tag not in NOISE_SENSITIVE_TAGS]
+    if not guarded:
+        guarded = ["historical_object"]
+    return fading, guarded
+
+
 def assess_fading(
     metadata_or_image: dict[str, Any] | str | Path | np.ndarray,
     base_dir: str | Path | None = None,
@@ -251,16 +273,21 @@ def assess_fading(
     Preferred input is the metadata dict from preprocessing.py. For convenience,
     this also accepts a metadata JSON path, image path, or already-loaded image.
     """
+    noise_sigma = 0.0
     if isinstance(metadata_or_image, dict):
         image = _image_region_from_metadata(metadata_or_image, base_dir=base_dir)
-        is_grayscale = metadata_or_image.get("analysis", {}).get("is_grayscale", False)
+        analysis = metadata_or_image.get("analysis", {})
+        is_grayscale = analysis.get("is_grayscale", False)
+        noise_sigma = float(analysis.get("noise_sigma", 0))
     elif isinstance(metadata_or_image, (str, Path)):
         input_path = Path(metadata_or_image)
         if input_path.suffix.lower() == ".json":
             with open(input_path, "r", encoding="utf-8") as f:
                 metadata = json.load(f)
             image = _image_region_from_metadata(metadata, base_dir=base_dir, metadata_path=input_path)
-            is_grayscale = metadata.get("analysis", {}).get("is_grayscale", False)
+            analysis = metadata.get("analysis", {})
+            is_grayscale = analysis.get("is_grayscale", False)
+            noise_sigma = float(analysis.get("noise_sigma", 0))
         else:
             image = load_color_image(input_path, base_dir=base_dir)
             is_grayscale = False
@@ -270,7 +297,8 @@ def assess_fading(
 
     fading_level = analyze_fading(image, is_grayscale)
     tags = extract_basic_tags(image)
-    
+    fading_level, tags = _apply_noise_guard(fading_level, tags, noise_sigma)
+
     return {
         "fading": fading_level,
         "tags": tags
@@ -288,11 +316,14 @@ def update_metadata_with_fading(
         base_dir=base_dir,
         metadata_path=metadata_path,
     )
-    is_grayscale = metadata.get("analysis", {}).get("is_grayscale", False)
-    
+    analysis = metadata.get("analysis", {})
+    is_grayscale = analysis.get("is_grayscale", False)
+    noise_sigma = float(analysis.get("noise_sigma", 0))
+
     fading_level = analyze_fading(image, is_grayscale)
     tags = extract_basic_tags(image)
-    
+    fading_level, tags = _apply_noise_guard(fading_level, tags, noise_sigma)
+
     metadata["fading_analysis"] = {
         "fading": fading_level,
         "tags": tags

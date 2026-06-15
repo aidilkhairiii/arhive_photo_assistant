@@ -24,9 +24,18 @@ data/raw/img.jpg
       │                                                                │
       ▼                                                                │ (read this)
 [ Module 2: quality ] ── blur / brightness / contrast ────────────────┤
-[ Module 3: fading  ] ── histogram / fading / tags (LLM) ─────────────┤
-[ Module 4: report  ] ── condition score / priority / dashboard ◀─────┘
+[ Module 3: fading  ] ── histogram / fading / tags (OpenCV) ──────────┤
+[ Module 4: report  ] ── score / priority / dashboard + narrative (LLM) ◀┘
 ```
+
+> **Where the LLM lives:** only **Module 4** calls an LLM (via OpenRouter) — and
+> only to write the human-readable narrative. Module 3's tags are OpenCV
+> heuristics, not a vision model. Everything else is pure image processing.
+
+A **Telegram bot** + an **OpenClaw skill** sit in front of this pipeline so
+non-technical users (history / museum staff) can just upload photos in chat and
+get a report back. See [Historical archive collection workflow](#historical-archive-collection-workflow)
+and [Handover](#handover--whats-left--how-to-continue).
 
 ---
 
@@ -66,17 +75,32 @@ for the rest of the team. For **every** image it performs:
 ├── quality_assestment.py   # Module 2 (done)
 ├── fading_analysis.py      # Module 3 (done)
 ├── report_generator.py     # Module 4 (done)
-├── main.py                 # orchestrator (done)
+├── main.py                 # orchestrator — runs Modules 1→4 (done)
+├── telegram_bot.py         # direct Telegram bot front-end (done)
+├── telegram_formatting.py  # formats pipeline results into one Telegram message
 ├── requirements.txt
+├── .env                    # tokens / API keys (git-ignored — create your own)
 ├── skills/
 │   └── archive-photo-triage/
 │       ├── SKILL.md        # OpenClaw skill for Telegram photo uploads
+│       ├── agents/
+│       │   └── openai.yaml
 │       └── scripts/
-│           └── run_archive_photo_pipeline.py
+│           └── run_archive_photo_pipeline.py   # single + batch + /rank runner
+├── deployment/             # cloud hosting: systemd services, deploy scripts,
+│   │                       #   OpenClaw gateway config
+│   ├── deploy_to_cloud.sh
+│   ├── setup_cloud_server.sh
+│   ├── openclaw.json
+│   ├── openclaw-gateway.service
+│   └── telegram-bot.service
 ├── data/
 │   ├── raw/                # <-- put dataset images here
-│   └── processed/          # Module 1 writes processed images here
-└── outputs/                # metadata, reports, dashboards, catalogues
+│   └── processed/          # Module 1 writes processed images here (git-ignored)
+└── outputs/                # all generated results (git-ignored)
+    ├── <id>.json           # per-image metadata (the cross-module contract)
+    ├── reports/            # <id>_card.png report cards + dashboard.png
+    └── catalogues/         # batch <batch_id>_catalogue.json + .csv
 ```
 
 ---
@@ -219,10 +243,11 @@ Module 1 measures them for you:
 
 ---
 
-## How to continue my work (Modules 2 → 4)
+## Module reference (2 → 4)
 
-Each module should **read the Module 1 JSON, add its results, and write them back
-(or hand them to `main.py`).** Suggested pattern so everything stays compatible:
+All three modules are implemented. Each one **reads the Module 1 JSON, adds its
+results, and writes them back** (or hands them to `main.py`). This section is the
+reference for how each works and the functions you can call directly:
 
 ### Module 2 — `quality_assestment.py`
 Module 2 is now implemented. It is a pure image-processing module, so it does
@@ -410,32 +435,39 @@ Module 4 uses an **LLM (via OpenRouter)** to write the human-readable restoratio
 narrative; everything else (scores, priority, fading, quality) is pure image
 processing with no LLM. Module 3's object tags are currently simple OpenCV
 heuristics (edge density + face detection), not an LLM — that's the obvious place
-to upgrade to a vision model later. The Telegram bot / Hermes skill that fronts the
-pipeline is built by the integration owner.
+to upgrade to a vision model later. The Telegram bot and OpenClaw skill that front
+the pipeline are implemented (see [Handover](#handover--current-state--how-it-fits-together)).
 
 ---
 
 ## Dependencies
 ```
-opencv-python
-numpy
-matplotlib        # Module 4: report cards + dashboard
+opencv-python              # Modules 1–3: all image processing
+numpy                      # Modules 1–4: array math
+matplotlib                 # Module 4: report cards + dashboard PNGs
+python-telegram-bot        # telegram_bot.py: photo-upload front-end
 ```
+Install everything with `pip install -r requirements.txt`.
+
 The Module 4 LLM narrative calls **OpenRouter** using only Python's standard
 library (`urllib`) — no extra SDK to install. Set `OPENROUTER_API_KEY` and
 `LLM_MODEL` in a `.env` file to enable it; without them Module 4 falls back to a
-rule-based template and runs fully offline.
+rule-based template and runs fully offline. `python-telegram-bot` is only needed
+if you run the Telegram bot; the core pipeline (`python main.py`) runs without it.
 
 ---
 
-## Handover — what's left & how to continue
+## Handover — current state & how it fits together
 
-**Status:** Modules 1–4 and the `main.py` orchestrator are done and tested on the
-61-image dataset. Running `python main.py` produces, for every photo: a metadata
-JSON (`outputs/<id>.json`), a styled report card (`outputs/reports/<id>_card.png`),
-and the archive dashboard (`outputs/reports/dashboard.png`).
+**Status: complete.** Modules 1–4, the `main.py` orchestrator, the Telegram bot,
+the OpenClaw skill, and the cloud-deployment scripts are all done and tested on
+the 61-image dataset. Running `python main.py` produces, for every photo: a
+metadata JSON (`outputs/<id>.json`), a styled report card
+(`outputs/reports/<id>_card.png`), and the archive dashboard
+(`outputs/reports/dashboard.png`).
 
-Two deliverables remain.
+The four pieces below (A–D) document the layers that sit **in front of** the
+core pipeline — how a real user reaches it from Telegram and how it is hosted.
 
 ### A. Telegram / OpenClaw skill — *(done)*
 

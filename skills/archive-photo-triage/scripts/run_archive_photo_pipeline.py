@@ -85,7 +85,7 @@ def _priority_score(metadata: dict[str, Any]) -> int:
     fading = metadata.get("fading_analysis", {}).get("fading", "Moderate")
 
     score = 100 - int(report.get("condition_score", 100))
-    sharpness = int(quality.get("blur", 100))
+    sharpness = int(quality.get("sharpness", quality.get("blur", 100)))
     contrast = int(quality.get("contrast", 100))
     brightness = int(quality.get("brightness", 50))
 
@@ -127,7 +127,7 @@ def _priority_reason(metadata: dict[str, Any]) -> str:
     quality = metadata.get("quality", {})
     fading = metadata.get("fading_analysis", {}).get("fading", "Unknown")
     return (
-        f"{fading.lower()} fading; sharpness {quality.get('blur')}, "
+        f"{fading.lower()} fading; sharpness {quality.get('sharpness', quality.get('blur'))}, "
         f"contrast {quality.get('contrast')}"
     )
 

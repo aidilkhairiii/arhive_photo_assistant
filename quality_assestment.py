@@ -11,7 +11,7 @@ This module consumes the metadata JSON produced by preprocessing.py. It reads
 `processed_gray_path`, crops to `analysis.content_box`, then computes:
 
 {
-  "blur": 75,
+  "sharpness": 75,
   "brightness": 68,
   "contrast": 52
 }
@@ -159,6 +159,11 @@ def calculate_blur_score(image: np.ndarray) -> int:
     Returns a 0-100 score. Higher means sharper / less blurry.
     """
     gray = _as_grayscale(image)
+    # Fix 2 — suppress grain first. Random noise adds high-frequency energy that
+    # inflates the Laplacian variance, making a noisy scan look "sharp". A light
+    # median blur removes that grain while leaving real edges, so the score
+    # reflects true detail rather than noise.
+    gray = cv2.medianBlur(gray, 3)
     laplacian_variance = cv2.Laplacian(gray, cv2.CV_64F).var()
     return _score((laplacian_variance / BLUR_REFERENCE_VARIANCE) * 100)
 
@@ -180,6 +185,10 @@ def calculate_contrast(image: np.ndarray) -> int:
     Returns a 0-100 score. Higher means stronger contrast.
     """
     gray = _as_grayscale(image)
+    # Fix 2 — suppress grain first. Noise adds pixel-to-pixel variance, which
+    # raises the standard deviation and fakes high contrast. A light median blur
+    # strips the grain so contrast reflects real tonal range.
+    gray = cv2.medianBlur(gray, 3)
     return _score((float(gray.std()) / 127.5) * 100)
 
 
@@ -238,8 +247,10 @@ def update_metadata_with_quality(
         base_dir=base_dir,
         metadata_path=metadata_path,
     )
+    # Fix 3 — write the sharpness value under "sharpness" (matches assess_quality);
+    # the old "blur" key name caused main.py and the runner to disagree.
     metadata["quality"] = {
-        "blur": calculate_blur_score(image),
+        "sharpness": calculate_blur_score(image),
         "brightness": calculate_brightness(image),
         "contrast": calculate_contrast(image),
     }

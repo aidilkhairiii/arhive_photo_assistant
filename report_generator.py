@@ -170,9 +170,9 @@ def compute_condition(metadata: dict[str, Any]) -> tuple[int, dict[str, float]]:
     fading_block = metadata.get("fading_analysis", {})
     analysis = metadata.get("analysis", {})
 
-    # NOTE: the JSON key is "blur" (the blur->sharpness rename was left
-    # half-done in Module 2); it holds the sharpness score. Higher = sharper.
-    sharpness = float(quality.get("blur", 0))
+    # Sharpness is stored under "sharpness" (older runs used "blur" — read both
+    # so existing metadata still scores correctly). Higher = sharper.
+    sharpness = float(quality.get("sharpness", quality.get("blur", 0)))
     brightness = float(quality.get("brightness", 0))
     contrast = float(quality.get("contrast", 0))
     fading = fading_block.get("fading", "Severe")
@@ -187,6 +187,16 @@ def compute_condition(metadata: dict[str, Any]) -> tuple[int, dict[str, float]]:
     }
 
     score = sum(subscores[key] * WEIGHTS[key] for key in WEIGHTS)
+
+    # Fix 1 — noise cap. Heavy grain leaks into contrast/sharpness and inflates
+    # the blend, so the cleanliness weight (0.20) alone cannot stop a very noisy
+    # scan from scoring "Good". Cap the result so a grainy image (which is also
+    # flagged "Heavy noise / grain" in the issues list) cannot outrank clean ones.
+    if noise_sigma > 18:
+        score = min(score, 40.0)   # heavy noise  -> Poor / High priority
+    elif noise_sigma > 12:
+        score = min(score, 55.0)   # noticeable noise -> at most Fair
+
     return int(round(score)), subscores
 
 
@@ -481,7 +491,7 @@ def render_card(metadata: dict[str, Any], report: dict[str, Any], out_dir: str |
     # quality metrics (traffic-light bars)
     bg.text(0.09, 0.405, "QUALITY", fontsize=9, fontweight="bold", color=TEXT_MUTED, va="center")
     y = 0.365
-    for name, value in (("Sharpness", quality.get("blur", 0)),
+    for name, value in (("Sharpness", quality.get("sharpness", quality.get("blur", 0))),
                         ("Brightness", quality.get("brightness", 0)),
                         ("Contrast", quality.get("contrast", 0))):
         bg.text(0.09, y, name, fontsize=10, color=TEXT_DARK, va="center")
